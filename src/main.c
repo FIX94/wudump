@@ -95,7 +95,7 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 
 void printhdr_noflip()
 {
-	println_noflip(0,"wud2sd v1.0 by FIX94");
+	println_noflip(0,"wudump v1.1 by FIX94");
 }
 
 int Menu_Main(void)
@@ -119,14 +119,16 @@ int Menu_Main(void)
 
 	printhdr_noflip();
 	println_noflip(2,"Please make sure to take out any currently inserted disc.");
-	println_noflip(3,"Also make sure you have at least 23.3GB free on your sd card.");
-	println_noflip(4,"Press A to continue or HOME to abort now.");
+	println_noflip(3,"Also make sure you have at least 23.3GB free on your device.");
+	println_noflip(4,"Press A to continue with a FAT32 SD Card as destination.");
+	println_noflip(5,"Press B to continue with a FAT32 USB Device as destination.");
+	println_noflip(6,"Press HOME to return to the Homebrew Launcher.");
 	OSScreenFlipBuffersEx(0);
 	OSScreenFlipBuffersEx(1);
 
     int vpadError = -1;
     VPADData vpad;
-
+	int action = 0;
 	while(1)
 	{
         VPADRead(0, &vpad, 1, &vpadError);
@@ -139,6 +141,11 @@ int Menu_Main(void)
 			}
 			else if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_A)
 				break;
+			else if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_B)
+			{
+				action = 1;
+				break;
+			}
 		}
 		usleep(50000);
 	}
@@ -159,7 +166,9 @@ int Menu_Main(void)
 	int fsaFd = -1;
 	int oddFd = -1;
 	int ret;
-	char sdPath[64];
+	char wudumpPath[64];
+	char wudPath[64];
+	char keyPath[64];
 	FILE *f = NULL;
 
 	//done with iosu exploit, take over mcp
@@ -197,12 +206,15 @@ int Menu_Main(void)
 		}
 		usleep(50000);
 	}
-	mkdir("sd:/wud2sd",0x600);
+	char *device = (action == 0) ? "sd:" : "usb:";
+	sprintf(wudumpPath,"%s/wudump",device);
+	mkdir(wudumpPath,0x600);
 
 	u8 discKey[0x10];
 	memcpy(discKey, (void*)0xF5E00000, 0x10);
 
-	f = fopen("sd:/wud2sd/key.bin", "wb");
+	sprintf(keyPath,"%s/key.bin",wudumpPath);
+	f = fopen(keyPath, "wb");
 	if(f == NULL)
 	{
 		println(line++,"Failed to write Disc Key!");
@@ -243,8 +255,8 @@ int Menu_Main(void)
 			if(f)
 				fclose(f);
 			f = NULL;
-			sprintf(sdPath, "sd:/wud2sd/game_part%i.wud", part);
-			f = fopen(sdPath, "wb");
+			sprintf(wudPath, "%s/game_part%i.wud", wudumpPath, part);
+			f = fopen(wudPath, "wb");
 			if(f == NULL)
 			{
 				println(line++,"Failed to write Disc WUD!");
@@ -274,7 +286,7 @@ int Menu_Main(void)
 	free(sectorBuf);
 	OSScreenClearBufferEx(0, 0);
 	OSScreenClearBufferEx(1, 0);
-	sprintf(progress,"0x%08x/0xBA7400 (100%%)",readSectors);
+	sprintf(progress,"0x%06X/0xBA7400 (100%%)",readSectors);
 	printhdr_noflip();
 	println_noflip(2,progress);
 	println_noflip(3,"Disc dumped!");
@@ -288,6 +300,7 @@ prgEnd:
 		if(f != NULL)
 			fclose(f);
 		fatUnmount("sd:");
+		fatUnmount("usb:");
 		if(oddFd >= 0)
 			IOSUHAX_FSA_RawClose(fsaFd, oddFd);
 		IOSUHAX_FSA_Close(fsaFd);
