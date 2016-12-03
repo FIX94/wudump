@@ -35,10 +35,11 @@ SOURCES		:=	src \
 				src/dynamic_libs \
 				src/fs \
 				src/system \
-				src/utils
+				src/utils \
+				src/polarssl
 DATA		:=  
 
-INCLUDES	:=  src payload
+INCLUDES	:=  src include payload
 
 #---------------------------------------------------------------------------------
 # options for code generation

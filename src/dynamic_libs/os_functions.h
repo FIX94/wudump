@@ -92,10 +92,13 @@ extern int (* OSIsThreadSuspended)(void *thread);
 extern int (* OSJoinThread)(void * thread, int * ret_val);
 extern int (* OSSetThreadPriority)(void * thread, int priority);
 extern void (* OSDetachThread)(void * thread);
+extern void* (* OSGetCurrentThread)(void);
+extern int (* OSGetThreadPriority)(void * thread);
 extern void (* OSSleepTicks)(u64 ticks);
 extern u64 (* OSGetTick)(void);
 extern u64 (* OSGetTime)(void);
 extern void (*OSTicksToCalendarTime)(u64 time, OSCalendarTime *calendarTime);
+extern int (* OSGetCoreId)(void);
 
 //!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //! Mutex functions

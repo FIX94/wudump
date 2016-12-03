@@ -10,6 +10,9 @@
 #include <stdio.h>
 #include <fat.h>
 #include <sys/stat.h>
+#include <polarssl/md5.h>
+#include <polarssl/sha1.h>
+#include "crc32.h"
 #include "dynamic_libs/os_functions.h"
 #include "dynamic_libs/sys_functions.h"
 #include "dynamic_libs/vpad_functions.h"
@@ -93,9 +96,66 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
+static const char *hdrStr = "wudump v1.2 by FIX94";
 void printhdr_noflip()
 {
-	println_noflip(0,"wudump v1.1 by FIX94");
+	println_noflip(0,hdrStr);
+}
+
+void write_hash_file(char *fName, char *dir, unsigned int oldcrc32, 
+	md5_context *md5ctx, sha1_context *sha1ctx)
+{
+	unsigned int crc32 = ~oldcrc32;
+	unsigned int md5[4];
+	md5_finish(md5ctx, (unsigned char*)md5);
+	unsigned int sha1[5];
+	sha1_finish(sha1ctx, (unsigned char*)sha1);
+
+	char wudPath[64];
+	sprintf(wudPath, "%s/%s.txt", dir, fName);
+	FILE *f = fopen(wudPath, "w");
+	if(f)
+	{
+		fprintf(f, "%s\n\n", hdrStr);
+		fprintf(f, "Hashes for %s.wud:\n", fName);
+		fprintf(f, "CRC32: %08X\n"
+			"MD5: %08X%08X%08X%08X\n"
+			"SHA1: %08X%08X%08X%08X%08X\n",
+			crc32, md5[0],md5[1],md5[2],md5[3],
+			sha1[0],sha1[1],sha1[2],sha1[3],sha1[4]);
+		fclose(f);
+		f = NULL;
+	}
+}
+
+static const int bufSize = SECTOR_SIZE*NUM_SECTORS;
+static void *sectorBuf = NULL;
+static bool threadRunning = true;
+static unsigned int oldcrc32 = 0xFFFFFFFF;
+static md5_context md5ctx;
+static sha1_context sha1ctx;
+static unsigned int oldPartCrc32 = 0xFFFFFFFF;
+static md5_context md5PartCtx;
+static sha1_context sha1PartCtx;
+
+static int hashThread(s32 argc, void *args)
+{
+	(void)argc;
+	(void)args;
+	while(threadRunning)
+	{
+		//update global hashes
+		oldcrc32 = crc32buffer(sectorBuf, bufSize, oldcrc32);
+		md5_update(&md5ctx, sectorBuf, bufSize);
+		sha1_update(&sha1ctx, sectorBuf, bufSize);
+		//update hashes for part file
+		oldPartCrc32 = crc32buffer(sectorBuf, bufSize, oldPartCrc32);
+		md5_update(&md5PartCtx, sectorBuf, bufSize);
+		sha1_update(&sha1PartCtx, sectorBuf, bufSize);
+		//go back to sleep
+		OSSuspendThread(OSGetCurrentThread());
+	}
+	return 0;
 }
 
 int Menu_Main(void)
@@ -103,17 +163,17 @@ int Menu_Main(void)
 	InitOSFunctionPointers();
 	InitSysFunctionPointers();
 	InitVPadFunctionPointers();
-    VPADInit();
+	VPADInit();
 
-    // Init screen
-    OSScreenInit();
-    int screen_buf0_size = OSScreenGetBufferSizeEx(0);
-    int screen_buf1_size = OSScreenGetBufferSizeEx(1);
+	// Init screen
+	OSScreenInit();
+	int screen_buf0_size = OSScreenGetBufferSizeEx(0);
+	int screen_buf1_size = OSScreenGetBufferSizeEx(1);
 	uint8_t *screenBuffer = (uint8_t*)memalign(0x100, screen_buf0_size+screen_buf1_size);
-    OSScreenSetBufferEx(0, screenBuffer);
-    OSScreenSetBufferEx(1, (screenBuffer + screen_buf0_size));
-    OSScreenEnableEx(0, 1);
-    OSScreenEnableEx(1, 1);
+	OSScreenSetBufferEx(0, screenBuffer);
+	OSScreenSetBufferEx(1, (screenBuffer + screen_buf0_size));
+	OSScreenEnableEx(0, 1);
+	OSScreenEnableEx(1, 1);
 	OSScreenClearBufferEx(0, 0);
 	OSScreenClearBufferEx(1, 0);
 
@@ -126,13 +186,13 @@ int Menu_Main(void)
 	OSScreenFlipBuffersEx(0);
 	OSScreenFlipBuffersEx(1);
 
-    int vpadError = -1;
-    VPADData vpad;
+	int vpadError = -1;
+	VPADData vpad;
 	int action = 0;
 	while(1)
 	{
-        VPADRead(0, &vpad, 1, &vpadError);
-        if(vpadError == 0)
+		VPADRead(0, &vpad, 1, &vpadError);
+		if(vpadError == 0)
 		{
 			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
 			{
@@ -198,8 +258,8 @@ int Menu_Main(void)
 		DCInvalidateRange((void*)0xF5E00000, 0x20);
 		if(*(volatile unsigned int*)0xF5E00000 != 0)
 			break;
-        VPADRead(0, &vpad, 1, &vpadError);
-        if(vpadError == 0)
+		VPADRead(0, &vpad, 1, &vpadError);
+		if(vpadError == 0)
 		{
 			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
 				goto prgEnd;
@@ -213,7 +273,7 @@ int Menu_Main(void)
 	u8 discKey[0x10];
 	memcpy(discKey, (void*)0xF5E00000, 0x10);
 
-	sprintf(keyPath,"%s/key.bin",wudumpPath);
+	sprintf(keyPath,"%s/game.key",wudumpPath);
 	f = fopen(keyPath, "wb");
 	if(f == NULL)
 	{
@@ -243,18 +303,45 @@ int Menu_Main(void)
 	}
 	char progress[64];
 	bool newF = true;
-	int part = 1;
+	int part = 0;
 	unsigned int readSectors = 0;
-	int bufSize = SECTOR_SIZE*NUM_SECTORS;
-	void *sectorBuf = malloc(bufSize);
+	sectorBuf = malloc(bufSize);
+	//full hashes
+	oldcrc32 = 0xFFFFFFFF;
+	md5_starts(&md5ctx);
+	sha1_starts(&sha1ctx);
+	//part hashes
+	oldPartCrc32 = 0xFFFFFFFF;
+	md5_starts(&md5PartCtx);
+	sha1_starts(&sha1PartCtx);
+
+	//create hashing thread
+	void *stack = memalign(0x20, 0x4000);
+	void *thread = memalign(8, 0x1000);
+	OSCreateThread(thread, hashThread, 0, NULL, (unsigned int)stack+0x4000, 0x4000, 20, (1<<OSGetCoreId()));
+
 	//0xBA7400 = full disc
 	while(readSectors < 0xBA7400)
 	{
 		if(newF)
 		{
-			if(f)
+			if(f != NULL)
+			{
+				//close file
 				fclose(f);
-			f = NULL;
+				f = NULL;
+				//write in file hashes
+				char tmpChar[64];
+				sprintf(tmpChar, "game_part%i", part);
+				write_hash_file(tmpChar, wudumpPath, oldPartCrc32, 
+					&md5PartCtx, &sha1PartCtx);
+				//open new hashes
+				oldPartCrc32 = 0xFFFFFFFF;
+				md5_starts(&md5PartCtx);
+				sha1_starts(&sha1PartCtx);
+			}
+			//set part int for next file
+			part++;
 			sprintf(wudPath, "%s/game_part%i.wud", wudumpPath, part);
 			f = fopen(wudPath, "wb");
 			if(f == NULL)
@@ -262,12 +349,15 @@ int Menu_Main(void)
 				println(line++,"Failed to write Disc WUD!");
 				goto prgEnd;
 			}
-			part++;
 			newF = false;
 		}
+		//read offsets until no error returns
 		ret = fsa_odd_read(fsaFd, oddFd, sectorBuf, readSectors);
 		if(ret < 0)
 			continue;
+		//update hashes in thread
+		OSResumeThread(thread);
+		//write in new offsets
 		fwrite(sectorBuf, 1, bufSize, f);
 		readSectors += NUM_SECTORS;
 		if((readSectors % 0x100000) == 0)
@@ -282,8 +372,40 @@ int Menu_Main(void)
 			OSScreenFlipBuffersEx(0);
 			OSScreenFlipBuffersEx(1);
 		}
+		//wait for hashes to get done
+		while(!OSIsThreadSuspended(thread)) ;
 	}
+
+	//write last part hash
+	if(f != NULL)
+	{
+		//close file
+		fclose(f);
+		f = NULL;
+		//write in file hashes
+		char tmpChar[64];
+		sprintf(tmpChar, "game_part%i", part);
+		write_hash_file(tmpChar, wudumpPath, oldPartCrc32, 
+			&md5PartCtx, &sha1PartCtx);
+		//open new hashes
+		oldPartCrc32 = 0xFFFFFFFF;
+		md5_starts(&md5PartCtx);
+		sha1_starts(&sha1PartCtx);
+	}
+
+	//write global hashes into file
+	write_hash_file("game", wudumpPath, oldcrc32, 
+		&md5ctx, &sha1ctx);
+
+	//close down hash thread
+	threadRunning = false;
+	OSResumeThread(thread);
+	OSJoinThread(thread, &ret);
+	free(thread);
+	free(stack);
 	free(sectorBuf);
+
+	//all finished!
 	OSScreenClearBufferEx(0, 0);
 	OSScreenClearBufferEx(1, 0);
 	sprintf(progress,"0x%06X/0xBA7400 (100%%)",readSectors);
@@ -309,10 +431,10 @@ prgEnd:
 	MCPHookClose();
 	sleep(5);
 	//will do IOSU reboot
-    OSForceFullRelaunch();
-    SYSLaunchMenu();
-    OSScreenEnableEx(0, 0);
-    OSScreenEnableEx(1, 0);
+	OSForceFullRelaunch();
+	SYSLaunchMenu();
+	OSScreenEnableEx(0, 0);
+	OSScreenEnableEx(1, 0);
 	free(screenBuffer);
-    return EXIT_RELAUNCH_ON_LOAD;
+	return EXIT_RELAUNCH_ON_LOAD;
 }

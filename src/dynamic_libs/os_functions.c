@@ -49,11 +49,13 @@ EXPORT_DECL(int, OSIsThreadSuspended, void *thread);
 EXPORT_DECL(int, OSSetThreadPriority, void * thread, int priority);
 EXPORT_DECL(int, OSJoinThread, void * thread, int * ret_val);
 EXPORT_DECL(void, OSDetachThread, void * thread);
+EXPORT_DECL(void*, OSGetCurrentThread, void);
+EXPORT_DECL(int, OSGetThreadPriority, void * thread);
 EXPORT_DECL(void, OSSleepTicks, u64 ticks);
 EXPORT_DECL(u64, OSGetTick, void);
 EXPORT_DECL(u64, OSGetTime, void);
 EXPORT_DECL(void, OSTicksToCalendarTime, u64 time, OSCalendarTime * calendarTime);
-
+EXPORT_DECL(int, OSGetCoreId, void);
 
 //!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 //! Mutex functions
@@ -202,10 +204,13 @@ void InitOSFunctionPointers(void)
     OS_FIND_EXPORT(coreinit_handle, OSJoinThread);
     OS_FIND_EXPORT(coreinit_handle, OSSetThreadPriority);
     OS_FIND_EXPORT(coreinit_handle, OSDetachThread);
+	OS_FIND_EXPORT(coreinit_handle, OSGetThreadPriority);
+	OS_FIND_EXPORT(coreinit_handle, OSGetCurrentThread);
     OS_FIND_EXPORT(coreinit_handle, OSSleepTicks);
     OS_FIND_EXPORT(coreinit_handle, OSGetTick);
     OS_FIND_EXPORT(coreinit_handle, OSGetTime);
     OS_FIND_EXPORT(coreinit_handle, OSTicksToCalendarTime);
+	OS_FIND_EXPORT(coreinit_handle, OSGetCoreId);
 
     //!----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
     //! Mutex functions
