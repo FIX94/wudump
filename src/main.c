@@ -96,7 +96,7 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "wudump v1.2 by FIX94";
+static const char *hdrStr = "wudump v1.3 by FIX94";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
@@ -237,8 +237,8 @@ int Menu_Main(void)
 		println(line++,"MCP hook could not be opened!");
 		goto prgEnd;
 	}
-	memset((void*)0xF5E00000, 0, 0x20);
-	DCFlushRange((void*)0xF5E00000, 0x20);
+	memset((void*)0xF5E10C00, 0, 0x20);
+	DCFlushRange((void*)0xF5E10C00, 0x20);
 	println(line++,"Done!");
 
 	//mount with full permissions
@@ -255,8 +255,8 @@ int Menu_Main(void)
 
 	while(1)
 	{
-		DCInvalidateRange((void*)0xF5E00000, 0x20);
-		if(*(volatile unsigned int*)0xF5E00000 != 0)
+		DCInvalidateRange((void*)0xF5E10C00, 0x20);
+		if(*(volatile unsigned int*)0xF5E10C00 != 0)
 			break;
 		VPADRead(0, &vpad, 1, &vpadError);
 		if(vpadError == 0)
@@ -270,8 +270,23 @@ int Menu_Main(void)
 	sprintf(wudumpPath,"%s/wudump",device);
 	mkdir(wudumpPath,0x600);
 
+	u8 cKey[0x10];
+	memcpy(cKey, (void*)0xF5E104E0, 0x10);
+
+	sprintf(keyPath,"%s/common.key",wudumpPath);
+	f = fopen(keyPath, "wb");
+	if(f == NULL)
+	{
+		println(line++,"Failed to write Common Key!");
+		goto prgEnd;
+	}
+	fwrite(cKey, 1, 0x10, f);
+	fclose(f);
+	f = NULL;
+	println(line++,"Common Key dumped!");
+
 	u8 discKey[0x10];
-	memcpy(discKey, (void*)0xF5E00000, 0x10);
+	memcpy(discKey, (void*)0xF5E10C00, 0x10);
 
 	sprintf(keyPath,"%s/game.key",wudumpPath);
 	f = fopen(keyPath, "wb");

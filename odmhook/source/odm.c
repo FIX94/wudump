@@ -9,5 +9,5 @@ void odm_readkey(unsigned int base, void *key)
 	//session key fd, used to decrypt drive data
 	int fd = *(volatile int*)(base + 0x409CC);
 	//decrypt disc key with the session key
-	IOS_FS_DECRYPT(fd, iv, 0x10, key, 0x10, (void*)0x1E00000, 0x10);
+	IOS_FS_DECRYPT(fd, iv, 0x10, key, 0x10, (void*)0x1E10C00, 0x10);
 }

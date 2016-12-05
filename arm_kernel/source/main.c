@@ -64,6 +64,9 @@ int _main()
 	void(*invalidate_dcache)(unsigned int, unsigned int) = (void(*)())0x08120164;
 	void(*flush_dcache)(unsigned int, unsigned int) = (void(*)())0x08120160;
 	char* (*kernel_memcpy)(void*, void*, int) = (char*(*)(void*, void*, int))0x08131D04;
+	int (*read_otp_internal)(int index, void* out_buf, u32 size) = (int (*)(int, void*, u32))0x08120248;
+
+	read_otp_internal(0, (void*)0x01E10400, 0x400);
 
 	flush_dcache(0x081200F0, 0x4001); // giving a size >= 0x4000 flushes all cache
 
