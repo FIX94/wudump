@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <polarssl/md5.h>
 #include <polarssl/sha1.h>
-#include "crc32.h"
+#include <iosuhax.h>
 #include "dynamic_libs/os_functions.h"
 #include "dynamic_libs/sys_functions.h"
 #include "dynamic_libs/vpad_functions.h"
@@ -20,7 +20,7 @@
 #include "common/common.h"
 #include "main.h"
 #include "exploit.h"
-#include "iosuhax.h"
+#include "../payload/wupserver_bin.h"
 
 //just to be able to call async
 void someFunc(void *arg)
@@ -96,16 +96,15 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "wudump v1.3 by FIX94";
+static const char *hdrStr = "wudump v1.4 by FIX94";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
 }
 
-void write_hash_file(char *fName, char *dir, unsigned int oldcrc32, 
+void write_hash_file(char *fName, char *dir, unsigned int crc32, 
 	md5_context *md5ctx, sha1_context *sha1ctx)
 {
-	unsigned int crc32 = ~oldcrc32;
 	unsigned int md5[4];
 	md5_finish(md5ctx, (unsigned char*)md5);
 	unsigned int sha1[5];
@@ -128,13 +127,16 @@ void write_hash_file(char *fName, char *dir, unsigned int oldcrc32,
 	}
 }
 
+//imported OS zlib crc32 function pointer
+static unsigned int (*zlib_crc32)(unsigned int crc32, const void *buf, int bufsize) = (void*)0;
+
 static const int bufSize = SECTOR_SIZE*NUM_SECTORS;
 static void *sectorBuf = NULL;
 static bool threadRunning = true;
-static unsigned int oldcrc32 = 0xFFFFFFFF;
+static unsigned int crc32Val = 0;
 static md5_context md5ctx;
 static sha1_context sha1ctx;
-static unsigned int oldPartCrc32 = 0xFFFFFFFF;
+static unsigned int crc32PartVal = 0;
 static md5_context md5PartCtx;
 static sha1_context sha1PartCtx;
 
@@ -145,11 +147,11 @@ static int hashThread(s32 argc, void *args)
 	while(threadRunning)
 	{
 		//update global hashes
-		oldcrc32 = crc32buffer(sectorBuf, bufSize, oldcrc32);
+		crc32Val = zlib_crc32(crc32Val, sectorBuf, bufSize);
 		md5_update(&md5ctx, sectorBuf, bufSize);
 		sha1_update(&sha1ctx, sectorBuf, bufSize);
 		//update hashes for part file
-		oldPartCrc32 = crc32buffer(sectorBuf, bufSize, oldPartCrc32);
+		crc32PartVal = zlib_crc32(crc32PartVal, sectorBuf, bufSize);
 		md5_update(&md5PartCtx, sectorBuf, bufSize);
 		sha1_update(&sha1PartCtx, sectorBuf, bufSize);
 		//go back to sleep
@@ -163,6 +165,9 @@ int Menu_Main(void)
 	InitOSFunctionPointers();
 	InitSysFunctionPointers();
 	InitVPadFunctionPointers();
+	unsigned int zlib_handle = 0;
+	OSDynLoad_Acquire("zlib125.rpl", &zlib_handle);
+	OSDynLoad_FindExport(zlib_handle, 0, "crc32", &zlib_crc32);
 	VPADInit();
 
 	// Init screen
@@ -222,6 +227,9 @@ int Menu_Main(void)
 	int line = 2;
 	//will inject our custom mcp code
 	println(line++,"Doing IOSU Exploit...");
+	*(volatile unsigned int*)0xF5E70100 = wupserver_bin_len;
+	memcpy((void*)0xF5E70120, &wupserver_bin, wupserver_bin_len);
+	DCStoreRange((void*)0xF5E70100, wupserver_bin_len + 0x40);
 	IOSUExploit();
 	int fsaFd = -1;
 	int oddFd = -1;
@@ -248,11 +256,10 @@ int Menu_Main(void)
 		println(line++,"FSA could not be opened!");
 		goto prgEnd;
 	}
-
 	fatInitDefault();
 
 	println(line++,"Please insert the disc you want to dump now to begin.");
-
+	//wait for disc key to be written
 	while(1)
 	{
 		DCInvalidateRange((void*)0xF5E10C00, 0x20);
@@ -266,39 +273,6 @@ int Menu_Main(void)
 		}
 		usleep(50000);
 	}
-	char *device = (action == 0) ? "sd:" : "usb:";
-	sprintf(wudumpPath,"%s/wudump",device);
-	mkdir(wudumpPath,0x600);
-
-	u8 cKey[0x10];
-	memcpy(cKey, (void*)0xF5E104E0, 0x10);
-
-	sprintf(keyPath,"%s/common.key",wudumpPath);
-	f = fopen(keyPath, "wb");
-	if(f == NULL)
-	{
-		println(line++,"Failed to write Common Key!");
-		goto prgEnd;
-	}
-	fwrite(cKey, 1, 0x10, f);
-	fclose(f);
-	f = NULL;
-	println(line++,"Common Key dumped!");
-
-	u8 discKey[0x10];
-	memcpy(discKey, (void*)0xF5E10C00, 0x10);
-
-	sprintf(keyPath,"%s/game.key",wudumpPath);
-	f = fopen(keyPath, "wb");
-	if(f == NULL)
-	{
-		println(line++,"Failed to write Disc Key!");
-		goto prgEnd;
-	}
-	fwrite(discKey, 1, 0x10, f);
-	fclose(f);
-	f = NULL;
-	println(line++,"Disc Key dumped!");
 
 	//opening raw odd might take a bit
 	int retry = 10;
@@ -316,17 +290,73 @@ int Menu_Main(void)
 		println(line++,"Failed to open Raw ODD!");
 		goto prgEnd;
 	}
+
+	//get our 2MB I/O Buffer and read out first sector
+	sectorBuf = malloc(bufSize);
+	if(sectorBuf == NULL || fsa_odd_read(fsaFd, oddFd, sectorBuf, 0) < 0)
+	{
+		println(line++,"Failed to read first disc sector!");
+		goto prgEnd;
+	}
+
+	//get disc name for folder
+	char discId[11];
+	discId[10] = '\0';
+	memcpy(discId, sectorBuf, 10);
+	char discStr[64];
+	sprintf(discStr, "Inserted %s", discId);
+	println(line++, discStr);
+
+	// make wudump dir we will write to
+	char *device = (action == 0) ? "sd:" : "usb:";
+	sprintf(wudumpPath, "%s/wudump", device);
+	mkdir(wudumpPath, 0x600);
+	sprintf(wudumpPath, "%s/wudump/%s", device, discId);
+	mkdir(wudumpPath, 0x600);
+
+	u8 cKey[0x10];
+	memcpy(cKey, (void*)0xF5E104E0, 0x10);
+
+	sprintf(keyPath, "%s/common.key", wudumpPath);
+	f = fopen(keyPath, "wb");
+	if(f == NULL)
+	{
+		println(line++,"Failed to write Common Key!");
+		goto prgEnd;
+	}
+	fwrite(cKey, 1, 0x10, f);
+	fclose(f);
+	f = NULL;
+	println(line++,"Common Key dumped!");
+
+	u8 discKey[0x10];
+	memcpy(discKey, (void*)0xF5E10C00, 0x10);
+
+	sprintf(keyPath, "%s/game.key", wudumpPath);
+	f = fopen(keyPath, "wb");
+	if(f == NULL)
+	{
+		println(line++,"Failed to write Disc Key!");
+		goto prgEnd;
+	}
+	fwrite(discKey, 1, 0x10, f);
+	fclose(f);
+	f = NULL;
+	println(line++, "Disc Key dumped!");
+
+	sprintf(discStr, "Dumping %s...", discId);
 	char progress[64];
 	bool newF = true;
 	int part = 0;
 	unsigned int readSectors = 0;
-	sectorBuf = malloc(bufSize);
+
 	//full hashes
-	oldcrc32 = 0xFFFFFFFF;
+	crc32Val = 0;
 	md5_starts(&md5ctx);
 	sha1_starts(&sha1ctx);
+
 	//part hashes
-	oldPartCrc32 = 0xFFFFFFFF;
+	crc32PartVal = 0;
 	md5_starts(&md5PartCtx);
 	sha1_starts(&sha1PartCtx);
 
@@ -348,10 +378,10 @@ int Menu_Main(void)
 				//write in file hashes
 				char tmpChar[64];
 				sprintf(tmpChar, "game_part%i", part);
-				write_hash_file(tmpChar, wudumpPath, oldPartCrc32, 
+				write_hash_file(tmpChar, wudumpPath, crc32PartVal, 
 					&md5PartCtx, &sha1PartCtx);
 				//open new hashes
-				oldPartCrc32 = 0xFFFFFFFF;
+				crc32PartVal = 0;
 				md5_starts(&md5PartCtx);
 				sha1_starts(&sha1PartCtx);
 			}
@@ -367,9 +397,9 @@ int Menu_Main(void)
 			newF = false;
 		}
 		//read offsets until no error returns
-		ret = fsa_odd_read(fsaFd, oddFd, sectorBuf, readSectors);
-		if(ret < 0)
-			continue;
+		do {
+			ret = fsa_odd_read(fsaFd, oddFd, sectorBuf, readSectors);
+		} while(ret < 0);
 		//update hashes in thread
 		OSResumeThread(thread);
 		//write in new offsets
@@ -383,7 +413,8 @@ int Menu_Main(void)
 			OSScreenClearBufferEx(1, 0);
 			sprintf(progress,"0x%06X/0xBA7400 (%i%%)",readSectors,(readSectors*100)/0xBA7400);
 			printhdr_noflip();
-			println_noflip(2,progress);
+			println_noflip(2,discStr);
+			println_noflip(3,progress);
 			OSScreenFlipBuffersEx(0);
 			OSScreenFlipBuffersEx(1);
 		}
@@ -400,17 +431,11 @@ int Menu_Main(void)
 		//write in file hashes
 		char tmpChar[64];
 		sprintf(tmpChar, "game_part%i", part);
-		write_hash_file(tmpChar, wudumpPath, oldPartCrc32, 
-			&md5PartCtx, &sha1PartCtx);
-		//open new hashes
-		oldPartCrc32 = 0xFFFFFFFF;
-		md5_starts(&md5PartCtx);
-		sha1_starts(&sha1PartCtx);
+		write_hash_file(tmpChar, wudumpPath, crc32PartVal, &md5PartCtx, &sha1PartCtx);
 	}
 
 	//write global hashes into file
-	write_hash_file("game", wudumpPath, oldcrc32, 
-		&md5ctx, &sha1ctx);
+	write_hash_file("game", wudumpPath, crc32Val, &md5ctx, &sha1ctx);
 
 	//close down hash thread
 	threadRunning = false;
@@ -418,7 +443,6 @@ int Menu_Main(void)
 	OSJoinThread(thread, &ret);
 	free(thread);
 	free(stack);
-	free(sectorBuf);
 
 	//all finished!
 	OSScreenClearBufferEx(0, 0);
@@ -441,6 +465,8 @@ prgEnd:
 		if(oddFd >= 0)
 			IOSUHAX_FSA_RawClose(fsaFd, oddFd);
 		IOSUHAX_FSA_Close(fsaFd);
+		if(sectorBuf != NULL)
+			free(sectorBuf);
 	}
 	//close out old mcp instance
 	MCPHookClose();
