@@ -96,7 +96,7 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "wudump v1.4 by FIX94";
+static const char *hdrStr = "wudump v1.4u1 by FIX94";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
@@ -227,9 +227,9 @@ int Menu_Main(void)
 	int line = 2;
 	//will inject our custom mcp code
 	println(line++,"Doing IOSU Exploit...");
-	*(volatile unsigned int*)0xF5E70100 = wupserver_bin_len;
-	memcpy((void*)0xF5E70120, &wupserver_bin, wupserver_bin_len);
-	DCStoreRange((void*)0xF5E70100, wupserver_bin_len + 0x40);
+	*(volatile unsigned int*)0xF5E70000 = wupserver_bin_len;
+	memcpy((void*)0xF5E70020, &wupserver_bin, wupserver_bin_len);
+	DCStoreRange((void*)0xF5E70000, wupserver_bin_len + 0x40);
 	IOSUExploit();
 	int fsaFd = -1;
 	int oddFd = -1;
