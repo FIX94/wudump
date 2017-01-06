@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 FIX94
+ * Copyright (C) 2016-2017 FIX94
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
@@ -96,7 +96,7 @@ int fsa_write(int fsa_fd, int fd, void *buf, int len)
 	return done;
 }
 
-static const char *hdrStr = "wudump v1.4u1 by FIX94";
+static const char *hdrStr = "wudump v1.5 by FIX94";
 void printhdr_noflip()
 {
 	println_noflip(0,hdrStr);
@@ -169,12 +169,13 @@ int Menu_Main(void)
 	OSDynLoad_Acquire("zlib125.rpl", &zlib_handle);
 	OSDynLoad_FindExport(zlib_handle, 0, "crc32", &zlib_crc32);
 	VPADInit();
+	memoryInitialize();
 
 	// Init screen
 	OSScreenInit();
 	int screen_buf0_size = OSScreenGetBufferSizeEx(0);
 	int screen_buf1_size = OSScreenGetBufferSizeEx(1);
-	uint8_t *screenBuffer = (uint8_t*)memalign(0x100, screen_buf0_size+screen_buf1_size);
+	uint8_t *screenBuffer = (uint8_t*)MEMBucket_alloc(screen_buf0_size+screen_buf1_size, 0x100);
 	OSScreenSetBufferEx(0, screenBuffer);
 	OSScreenSetBufferEx(1, (screenBuffer + screen_buf0_size));
 	OSScreenEnableEx(0, 1);
@@ -201,7 +202,8 @@ int Menu_Main(void)
 		{
 			if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_HOME)
 			{
-				free(screenBuffer);
+				MEMBucket_free(screenBuffer);
+				memoryRelease();
 				return EXIT_SUCCESS;
 			}
 			else if((vpad.btns_d | vpad.btns_h) & VPAD_BUTTON_A)
@@ -292,7 +294,7 @@ int Menu_Main(void)
 	}
 
 	//get our 2MB I/O Buffer and read out first sector
-	sectorBuf = malloc(bufSize);
+	sectorBuf = MEMBucket_alloc(bufSize, 0x100);
 	if(sectorBuf == NULL || fsa_odd_read(fsaFd, oddFd, sectorBuf, 0) < 0)
 	{
 		println(line++,"Failed to read first disc sector!");
@@ -344,6 +346,14 @@ int Menu_Main(void)
 	f = NULL;
 	println(line++, "Disc Key dumped!");
 
+	int apd_enabled = 0;
+	IMIsAPDEnabled(&apd_enabled);
+	if(apd_enabled)
+	{
+		if(IMDisableAPD() == 0)
+			println(line++, "Disabled Auto Power-Down.");
+	}
+
 	sprintf(discStr, "Dumping %s...", discId);
 	char progress[64];
 	bool newF = true;
@@ -361,8 +371,8 @@ int Menu_Main(void)
 	sha1_starts(&sha1PartCtx);
 
 	//create hashing thread
-	void *stack = memalign(0x20, 0x4000);
-	void *thread = memalign(8, 0x1000);
+	void *stack = MEMBucket_alloc(0x4000, 0x20);
+	void *thread = memalign(8, 0x1000); //thread cant be in MEMBucket
 	OSCreateThread(thread, hashThread, 0, NULL, (unsigned int)stack+0x4000, 0x4000, 20, (1<<OSGetCoreId()));
 
 	//0xBA7400 = full disc
@@ -390,10 +400,7 @@ int Menu_Main(void)
 			sprintf(wudPath, "%s/game_part%i.wud", wudumpPath, part);
 			f = fopen(wudPath, "wb");
 			if(f == NULL)
-			{
-				println(line++,"Failed to write Disc WUD!");
-				goto prgEnd;
-			}
+				break;
 			newF = false;
 		}
 		//read offsets until no error returns
@@ -441,16 +448,25 @@ int Menu_Main(void)
 	threadRunning = false;
 	OSResumeThread(thread);
 	OSJoinThread(thread, &ret);
-	free(thread);
-	free(stack);
+	free(thread); //thread cant be in MEMBucket
+	MEMBucket_free(stack);
 
 	//all finished!
 	OSScreenClearBufferEx(0, 0);
 	OSScreenClearBufferEx(1, 0);
-	sprintf(progress,"0x%06X/0xBA7400 (100%%)",readSectors);
+	sprintf(progress,"0x%06X/0xBA7400 (%i%%)",readSectors,(readSectors*100)/0xBA7400);
 	printhdr_noflip();
-	println_noflip(2,progress);
-	println_noflip(3,"Disc dumped!");
+	println_noflip(2,discStr);
+	println_noflip(3,progress);
+	if(readSectors == 0xBA7400)
+		println_noflip(4,"Disc dumped!");
+	else //only error we handle while dumping
+		println_noflip(4,"Failed to write Disc WUD!");
+	if(apd_enabled)
+	{
+		if(IMEnableAPD() == 0)
+			println_noflip(5, "Re-Enabled Auto Power-Down.");
+	}
 	OSScreenFlipBuffersEx(0);
 	OSScreenFlipBuffersEx(1);
 
@@ -466,7 +482,7 @@ prgEnd:
 			IOSUHAX_FSA_RawClose(fsaFd, oddFd);
 		IOSUHAX_FSA_Close(fsaFd);
 		if(sectorBuf != NULL)
-			free(sectorBuf);
+			MEMBucket_free(sectorBuf);
 	}
 	//close out old mcp instance
 	MCPHookClose();
@@ -476,6 +492,7 @@ prgEnd:
 	SYSLaunchMenu();
 	OSScreenEnableEx(0, 0);
 	OSScreenEnableEx(1, 0);
-	free(screenBuffer);
+	MEMBucket_free(screenBuffer);
+	memoryRelease();
 	return EXIT_RELAUNCH_ON_LOAD;
 }
