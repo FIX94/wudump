@@ -12,9 +12,9 @@ copy /b game_part1.wud + game_part2.wud + game_part3.wud + game_part4.wud + game
 
 If you would just like to install your game using wupinstaller then grab wud2app:  
 https://github.com/FIX94/wud2app/releases  
-If you dont want to merge all .wud files you can put wud2app into a folder on your pc and run it from a cmd with the wudump folder path as argument, for example if the sd/usb folder happens to be in "P:\wudump" on windows you can just run wud2app like:
+If you dont want to merge all .wud files you can put wud2app into a folder on your pc and run it from a cmd with the wudump folder path as argument, for example if the sd/usb folder happens to be in "P:\wudump\WUP-P-TEST" on windows you can just run wud2app like:
 ```
-wud2app "P:\wudump"
+wud2app "P:\wudump\WUP-P-TEST"
 ```
 If you do have all .wud files merged then put wud2app into the folder of the merged .wud and run it like run it like:  
 ```
