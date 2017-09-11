@@ -46,9 +46,9 @@ INCLUDES	:=  src include payload
 # options for code generation
 #---------------------------------------------------------------------------------
 CFLAGS	:=  -std=gnu11 -mrvl -mcpu=750 -meabi -mhard-float -ffast-math \
-		    -D__wiiu__ -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing -D_GNU_SOURCE $(INCLUDE)
+		    -O3 -D__wiiu__ -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing -D_GNU_SOURCE $(INCLUDE)
 CXXFLAGS := -std=gnu++11 -mrvl -mcpu=750 -meabi -mhard-float -ffast-math \
-		    -D__wiiu__ -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing -D_GNU_SOURCE $(INCLUDE)
+		    -O3 -D__wiiu__ -Wall -Wextra -Wno-unused-parameter -Wno-strict-aliasing -D_GNU_SOURCE $(INCLUDE)
 ASFLAGS	:= -mregnames
 LDFLAGS	:= -nostartfiles -Wl,-Map,$(notdir $@).map,-wrap,malloc,-wrap,free,-wrap,memalign,-wrap,calloc,-wrap,realloc,-wrap,malloc_usable_size,-wrap,_malloc_r,-wrap,_free_r,-wrap,_realloc_r,-wrap,_calloc_r,-wrap,_memalign_r,-wrap,_malloc_usable_size_r,-wrap,valloc,-wrap,_valloc_r,-wrap,_pvalloc_r,--gc-sections
 
