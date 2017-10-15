@@ -1,0 +1,13 @@
+*.o
+*.elf
+*.d
+build/.map
+payload/*
+arm_kernel/arm_kernel.bin
+arm_kernel/arm_kernel_bin.h
+arm_user/arm_user.bin
+arm_user/arm_user_bin.h
+odmhook/odmhook.bin
+odmhook/odmhook_bin.h
+wupserver/wupserver.bin
+wupserver/wupserver_bin.h
