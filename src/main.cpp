@@ -400,22 +400,22 @@ int Menu_Main(void){
 
 	//full hashes
 
-	if(!useNTFS){
         crc32Val = 0;
         md5_starts(&md5ctx);
         sha1_starts(&sha1ctx);
 
+	if(!useNTFS){
         //part hashes
         crc32PartVal = 0;
         md5_starts(&md5PartCtx);
         sha1_starts(&sha1PartCtx);
+	}
 
         //create hashing thread
 
         stack = MEMBucket_alloc(0x4000, 0x20);
         thread = (OSThread*)memalign(8, 0x1000); //thread cant be in MEMBucket
         OSCreateThread(thread, hashThread, 0, NULL, (u32)stack+0x4000, 0x4000, 20, (1<<OSGetCoreId()));
-	}
 
 	//0xBA7400 = full disc
 	while(readSectors < 0xBA7400) {
@@ -431,11 +431,11 @@ int Menu_Main(void){
                     char tmpChar[64];
                     sprintf(tmpChar, "game_part%i", part);
                     write_hash_file(tmpChar, wudumpPath, crc32PartVal, &md5PartCtx, &sha1PartCtx);
+                }
                     //open new hashes
                     crc32PartVal = 0;
                     md5_starts(&md5PartCtx);
                     sha1_starts(&sha1PartCtx);
-				}
 			}
 
 			//set part int for next file
@@ -457,7 +457,7 @@ int Menu_Main(void){
 			ret = fsa_odd_read(fsaFd, oddFd, sectorBuf, readSectors);
 		} while(ret < 0);
 		//update hashes in thread
-		if(!useNTFS){ OSResumeThread(thread); }
+		OSResumeThread(thread);
 		//write in new offsets
 		fwrite(sectorBuf, 1, bufSize, f);
 		readSectors += NUM_SECTORS;
@@ -492,7 +492,6 @@ int Menu_Main(void){
 	}
 
 	//write global hashes into file
-	if(!useNTFS){
         write_hash_file("game", wudumpPath, crc32Val, &md5ctx, &sha1ctx);
         //close down hash thread
         threadRunning = false;
@@ -500,7 +499,6 @@ int Menu_Main(void){
         OSJoinThread(thread, &ret);
         free(thread); //thread cant be in MEMBucket
         MEMBucket_free(stack);
-    }
 
 	//all finished!
 	OSScreenClearBufferEx(0, 0);
